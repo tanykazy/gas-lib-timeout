@@ -11,10 +11,15 @@
  * @param {boolean} [options.debug] - Whether or not to enable debug logging.
  */
 function timeout(caller, event, iterator, callback, options) {
+  // Merge default options with user provided options
   options = Object.assign({
+    // Default timeout of 5 minutes (in milliseconds)
     timeout: 5 * 60 * 1000,
+    // Default delay of 1 minute (in milliseconds)
     delay: 1 * 60 * 1000,
+    // Record the start time
     start: Date.now(),
+    // Default debug logging to off
     debug: false
   }, options);
 
@@ -26,6 +31,9 @@ function timeout(caller, event, iterator, callback, options) {
   }
   if (typeof callback !== 'function') {
     throw new TypeError('callback is not function.');
+  }
+  if (!iterator) {
+    throw new ReferenceError('iterator is not defined.');
   }
 
   if (event) {
@@ -108,16 +116,22 @@ function timeout(caller, event, iterator, callback, options) {
  * @param {boolean} [options.debug] - Whether or not to enable debug logging.
  */
 function timeoutInParallel(caller, event, iterator, callback, options) {
+  // Merge default options with user provided options
   options = Object.assign({
+    // Default timeout of 5 minutes (in milliseconds)
     timeout: 5 * 60 * 1000,
+    // Default delay of 1 minute (in milliseconds)
     delay: 1 * 60 * 1000,
+    // Record the start time
     start: Date.now(),
+    // Default split value 
     split: 4,
+    // Default debug logging to off
     debug: false
   }, options);
 
   if (options.split > 4) {
-    options.split = 4;
+    throw new RangeError('options.split cannot be greater than 4.');
   }
 
   if (!event) {
@@ -309,7 +323,18 @@ function createRestartableIteratorFromArray(array) {
   return Object.seal(iterator);
 }
 
+/**
+ * A callback function that calls the API to return results split by pageToken
+ * @callback requestCallback
+ * @param {string} pageToken
+ * @returns {*}
+ */
 
+/**
+ * Creates a restartable iterator from a provided request function. The iterator allows sequential access to results split by pageToken, and offers the ability to 'restart' iteration from the beginning.
+ * @param {requestCallback} request 
+ * @returns 
+ */
 function createRestartableIteratorFromPageTokenResponse(request) {
   const iterator = new Object();
 
