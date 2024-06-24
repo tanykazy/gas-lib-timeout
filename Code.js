@@ -2,7 +2,10 @@
  * The timeout() function executes the specified code on a set of values sourced from an iterable object. Sets a timer and restarts the specified code when the execution time approaches the Google Apps Script time limit.
  * @param {function} caller - The function to be executed.
  * @param {object} event - The event object that triggered the function.
- * @param {object} iterator - The iterable object that contains the values to be processed.
+ * @param {object} iterator - A union containing the values ​​to be processed.
+ * @param {Array} iterator.array - The array to be iterated over.
+ * @param {GoogleAppsScript.Spreadsheet.Range} iterator.range - The range object to iterate over.
+ * @param {(pageToken: string) => object} iterator.request - The request that return paginated results.
  * @param {function} callback - The function to be executed for each value in the iterable object.
  * @param {object} [options] - The options object.
  * @param {number} [options.timeout] - The maximum amount of time (in milliseconds) that the function can run before it is interrupted.
@@ -34,6 +37,16 @@ function timeout(caller, event, iterator, callback, options) {
   }
   if (!iterator) {
     throw new ReferenceError('iterator is not defined.');
+  }
+  if ([iterator.array, iterator.range, iterator.request].filter((e) => !!e).length > 1) {
+    throw new TypeError('iterator cannot be both array and range and request.');
+  }
+  if (iterator.array) {
+    iterator = createRestartableIteratorFromArray(iterator.array);
+  } else if (iterator.range) {
+    iterator = createRestartableIteratorFromRange(iterator.range);
+  } else if (iterator.request) {
+    iterator = createRestartableIteratorFromPageTokenResponse(iterator.request);
   }
 
   if (event) {
@@ -106,7 +119,9 @@ function timeout(caller, event, iterator, callback, options) {
  * Execute the specified function in parallel with timeout handling.
  * @param {function} caller - The function to be executed.
  * @param {object} event - The event object that triggered the function.
- * @param {object} iterator - The iterable object that contains the values to be processed.
+ * @param {object} iterator - A union containing the values ​​to be processed.
+ * @param {Array} iterator.array - The array to be iterated over.
+ * @param {GoogleAppsScript.Spreadsheet.Range} iterator.range - The range object to iterate over.
  * @param {function} callback - The function to be executed for each value in the iterable object.
  * @param {object} [options] - The options object.
  * @param {number} [options.split] - The number of times to split the iterable object.
@@ -130,20 +145,30 @@ function timeoutInParallel(caller, event, iterator, callback, options) {
     debug: false
   }, options);
 
+  // Check if the iterator is a request object.
+  if (iterator.request) {
+    throw new TypeError('iterators cannot be request.');
+  }
+
+  // Check if the split option is valid (cannot be greater than 4)
   if (options.split > 4) {
     throw new RangeError('options.split cannot be greater than 4.');
   }
 
+  // If no event is provided, initiate the splitting process
   if (!event) {
+    // Check if splitting would exceed the maximum trigger limit
     if (Math.pow(2, options.split) > (20 - ScriptApp.getProjectTriggers().length)) {
       throw new Error('Limit will be exceede.');
     }
 
+    // Create split triggers for parallel execution
     createSplitTrigger_(options.split, iterator.index, iterator.length, caller, options);
 
     return;
   }
 
+  // If an event is provided, handle the timeout logic
   timeout(caller, event, iterator, callback, options);
 
   return;
@@ -158,23 +183,31 @@ function timeoutInParallel(caller, event, iterator, callback, options) {
  * @param {object} options - An object containing configuration options for the triggers:
  */
 function createSplitTrigger_(split, index, length, caller, options) {
+  // Calculate the length of the current section
   const section = length - index;
+
+  // Calculate the midpoint of the current section
   const left = Math.floor(section / 2);
+
+  // If further splits are possible, recursively create triggers for the two halves
   if (split > 0 && left > 1) {
     createSplitTrigger_(split - 1, index, index + left, caller, options);
     createSplitTrigger_(split - 1, index + left, length, caller, options);
   } else {
+    // Base case: create a trigger for the current segment
     const trigger = ScriptApp.newTrigger(caller.name)
       .timeBased()
       .after(options.delay)
       .create();
     console.info('Create trigger. Function name: %s Unique ID: %s', trigger.getHandlerFunction(), trigger.getUniqueId());
 
+    // Store the start and end indices for the segment as a property associated with the trigger
     const property = {
       index: index,
       length: length
     };
 
+    // Store the properties associated with the trigger
     PropertiesService.getUserProperties()
       .setProperty(trigger.getUniqueId(), JSON.stringify(property));
     console.info('Save property.', property);
