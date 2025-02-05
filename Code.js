@@ -12,6 +12,7 @@
  * @param {number} [options.delay] - The amount of time (in milliseconds) to wait before restarting the function.
  * @param {number} [options.start] - The start time (in milliseconds) of the function.
  * @param {boolean} [options.debug] - Whether or not to enable debug logging.
+ * @returns {GoogleAppsScript.Script.Trigger | null} - a GoogleAppsScript.Script.Trigger or null
  */
 function timeout(caller, event, iterator, callback, options) {
   // Merge default options with user provided options
@@ -49,20 +50,15 @@ function timeout(caller, event, iterator, callback, options) {
     iterator = createRestartableIteratorFromPageTokenResponse(iterator.request);
   }
 
-  if (event) {
+  if (event && event.triggerUid) {
     const value = PropertiesService.getUserProperties()
-      .getProperty(event.triggerUid);
+      .getProperty(`${ScriptApp.getScriptId()}/${event.triggerUid}`);
 
     if (value === null) {
       throw new Error('Cannot find property for %s.', event.triggerUid);
     }
 
-    const property = {
-      index: iterator.index,
-      length: iterator.length
-    };
-
-    Object.assign(property, JSON.parse(value));
+    const property = Object.assign({}, JSON.parse(value));
     console.info('Restore property.', property);
 
     const triggers = ScriptApp.getProjectTriggers();
@@ -72,21 +68,31 @@ function timeout(caller, event, iterator, callback, options) {
         console.log('Delete trigger: %s', event.triggerUid);
 
         PropertiesService.getUserProperties()
-          .deleteProperty(event.triggerUid);
+          .deleteProperty(`${ScriptApp.getScriptId()}/${event.triggerUid}`);
         console.log('Delete property.');
       }
     }
 
-    iterator.index = property.index;
-    iterator.length = property.length;
+    Object.assign(iterator, property);
   }
 
   for (const value of iterator) {
-    const stop = callback(value);
+    console.info(`iterator[${iterator.index}/${iterator.length}]`);
 
-    if (stop) {
-      console.log('Callback function returnd [stop = true].');
-      return;
+    try {
+      console.time(caller.name);
+
+      callback(value);
+
+      console.timeEnd(caller.name);
+    } catch (error) {
+      if (error instanceof StopError) {
+        console.info('StopError catched.');
+
+        return null;
+      }
+
+      throw error;
     }
 
     const progress = Date.now() - options.start;
@@ -100,6 +106,7 @@ function timeout(caller, event, iterator, callback, options) {
       .timeBased()
       .after(options.delay)
       .create();
+
     console.info('Create trigger. Function name: %s Unique ID: %s', trigger.getHandlerFunction(), trigger.getUniqueId());
 
     const property = {
@@ -108,11 +115,13 @@ function timeout(caller, event, iterator, callback, options) {
     };
 
     PropertiesService.getUserProperties()
-      .setProperty(trigger.getUniqueId(), JSON.stringify(property));
+      .setProperty(`${ScriptApp.getScriptId()}/${trigger.getUniqueId()}`, JSON.stringify(property));
     console.info('Save property.', property);
+
+    return trigger;
   }
 
-  return;
+  return null;
 }
 
 /**
@@ -145,9 +154,20 @@ function timeoutInParallel(caller, event, iterator, callback, options) {
     debug: false
   }, options);
 
+  if (!iterator) {
+    throw new ReferenceError('iterator is not defined.');
+  }
   // Check if the iterator is a request object.
   if (iterator.request) {
     throw new TypeError('iterators cannot be request.');
+  }
+  if ([iterator.array, iterator.range].filter((e) => !!e).length > 1) {
+    throw new TypeError('iterator cannot be both array and range.');
+  }
+  if (iterator.array) {
+    iterator = createRestartableIteratorFromArray(iterator.array);
+  } else if (iterator.range) {
+    iterator = createRestartableIteratorFromRange(iterator.range);
   }
 
   // Check if the split option is valid (cannot be greater than 4)
@@ -164,14 +184,10 @@ function timeoutInParallel(caller, event, iterator, callback, options) {
 
     // Create split triggers for parallel execution
     createSplitTrigger_(options.split, iterator.index, iterator.length, caller, options);
-
-    return;
   }
 
   // If an event is provided, handle the timeout logic
   timeout(caller, event, iterator, callback, options);
-
-  return;
 }
 
 /**
@@ -209,7 +225,7 @@ function createSplitTrigger_(split, index, length, caller, options) {
 
     // Store the properties associated with the trigger
     PropertiesService.getUserProperties()
-      .setProperty(trigger.getUniqueId(), JSON.stringify(property));
+      .setProperty(`${ScriptApp.getScriptId()}/${trigger.getUniqueId()}`, JSON.stringify(property));
     console.info('Save property.', property);
   }
 }
@@ -438,3 +454,26 @@ function createRestartableIteratorFromPageTokenResponse(request) {
 
   return Object.seal(iterator);
 }
+
+/**
+ * A custom error that can be thrown to stop the execution of the timeout function.
+ * @param {string} [message=''] - The message of the error.
+ * @param {object} [options] - The options object.
+ * @param {Error} [options.cause] - The cause of the error.
+ */
+function StopError(message = '', options) {
+  Object.defineProperties(this, {
+    cause: {
+      configurable: true,
+      enumerable: false,
+      value: undefined,
+      writable: true
+    }
+  });
+  this.message = message;
+  if (options && options.cause) {
+    this.cause = options.cause;
+  }
+}
+StopError.prototype = Error.prototype;
+StopError.prototype.name = 'StopError';
