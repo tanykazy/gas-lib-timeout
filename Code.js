@@ -1,67 +1,36 @@
 /**
- * A function to be executed.
- * @callback caller
- * @param {GoogleAppsScript.Events.TimeDriven} event - The event object that triggered the function.
+ * @file The library provides a way to set a timeout on a function call: if the function does not complete within the specified timeout, a timer is set to resume processing after a certain amount of time.
  */
 
-/**
- * A callback to be executed on each iteration with the value retrieved from the iterator as the argument.
- * @callback iteratorCallback
- * @param {*} value - The value retrieved from the iterator.
- * @throws {StopError} - If the error is an instance of StopError, the execution of the timeout function will be stopped.
- */
-
-/**
- * An iterator object.
- * @typedef {Object} Iterators
- * @property {Array} array - The array to be iterated over.
- * @property {GoogleAppsScript.Spreadsheet.Range} range - The range object to iterate over.
- * @property {requestCallback} request - A callback to request that paginated results be returned.
- */
-
-/**
- * A callback to request that paginated results be returned.
- * @callback requestCallback
- * @param {string} pageToken - The page token to be used to retrieve the next page of results.
- * @throws {StopError} - If the error is an instance of StopError, the execution of the timeout function will be stopped.
- */
-
-/**
- * An object containing options for the timeout function.
- * @typedef {Object} Options
- * @property {number} timeout - The maximum amount of time (in milliseconds) that the function can run before it is interrupted.
- * @property {number} delay - The amount of time (in milliseconds) to wait before restarting the function.
- * @property {number} start - The start time (in milliseconds) of the function.
- * @property {boolean} debug - Whether or not to enable debug logging.
- */
+// Default timeout of 5 minutes (in milliseconds)
+const DEFAULT_TIMEOUT = 300000; // 5 * 60 * 1000
+// Default delay of 1 minute (in milliseconds)
+const DEFAULT_DELAY = 60000; // 1 * 60 * 1000
+// Default split value 
+const DEFAULT_SPLIT = 4;
+// Default debug logging to off
+const DEFAULT_DEBUG = false;
 
 /**
  * The timeout() function executes the specified code on a set of values sourced from an iterable object. Sets a timer and restarts the specified code when the execution time approaches the Google Apps Script time limit.
- * @param {caller} caller - The function to be executed.
+ * @param {(event: GoogleAppsScript.Events.TimeDriven) => void} caller - The function to be executed.
  * @param {GoogleAppsScript.Events.TimeDriven} event - The event object that triggered the function.
- * @param {Iterators} iterator - A union containing the values ​​to be processed.
- * @param {Array} [iterator.array] - The array to be iterated over.
- * @param {GoogleAppsScript.Spreadsheet.Range} [iterator.range] - The range object to iterate over.
- * @param {requestCallback} [iterator.request] - A callback to request that paginated results be returned.
- * @param {iteratorCallback} callback - The function to be executed for each value in the iterable object.
- * @param {Options} [options] - The options object.
- * @param {number} [options.timeout=300000] - The maximum amount of time (in milliseconds) that the function can run before it is interrupted.
- * @param {number} [options.delay=60000] - The amount of time (in milliseconds) to wait before restarting the function.
- * @param {number} [options.start=Date.now()] - The start time (in milliseconds) of the function.
- * @param {boolean} [options.debug=false] - Whether or not to enable debug logging.
- * @returns {GoogleAppsScript.Script.Trigger | null} - a GoogleAppsScript.Script.Trigger or null
+ * @param {{array?: any[][], range?: GoogleAppsScript.Spreadsheet.Range, request?: (pageToken: string) => any}} iterator - A union containing the values ​​to be processed.
+ * @param {(value: any) => void} callback - A function that is executed for each value in the iterable object, and will stop processing if it raises a StopError.
+ * @param {{timeout?: number, delay?: number, start?: number, debug?: boolean}} [options] - The options object.
+ * @returns {(GoogleAppsScript.Script.Trigger|null)} - a GoogleAppsScript.Script.Trigger or null
  */
 function timeout(caller, event, iterator, callback, options) {
   // Merge default options with user provided options
   options = Object.assign({
     // Default timeout of 5 minutes (in milliseconds)
-    timeout: 300000, // 5 * 60 * 1000
+    timeout: DEFAULT_TIMEOUT, // 5 * 60 * 1000
     // Default delay of 1 minute (in milliseconds)
-    delay: 60000, // 1 * 60 * 1000
+    delay: DEFAULT_DELAY, // 1 * 60 * 1000
     // Record the start time
     start: Date.now(),
     // Default debug logging to off
-    debug: false
+    debug: DEFAULT_DEBUG
   }, options);
 
   if (typeof caller !== 'function') {
@@ -163,32 +132,25 @@ function timeout(caller, event, iterator, callback, options) {
 
 /**
  * Execute the specified function in parallel with timeout handling.
- * @param {caller} caller - The function to be executed.
+ * @param {(event: GoogleAppsScript.Events.TimeDriven) => void} caller - The function to be executed.
  * @param {GoogleAppsScript.Events.TimeDriven} event - The event object that triggered the function.
- * @param {Iterators} iterator - A union containing the values ​​to be processed.
- * @param {Array} [iterator.array] - The array to be iterated over.
- * @param {GoogleAppsScript.Spreadsheet.Range} [iterator.range] - The range object to iterate over.
- * @param {iteratorCallback} callback - The function to be executed for each value in the iterable object.
- * @param {Options} [options] - The options object.
- * @param {number} [options.split=4] - The number of times to split the iterable object.
- * @param {number} [options.timeout=300000] - The maximum amount of time (in milliseconds) that the function can run before it is interrupted.
- * @param {number} [options.delay=60000] - The amount of time (in milliseconds) to wait before restarting the function.
- * @param {number} [options.start=Date.now()] - The start time (in milliseconds) of the function.
- * @param {boolean} [options.debug=false] - Whether or not to enable debug logging.
+ * @param {{array?: any[][], range?: GoogleAppsScript.Spreadsheet.Range}} iterator - A union containing the values ​​to be processed.
+ * @param {(value: any) => void} callback - A function that is executed for each value in the iterable object, and will stop processing if it raises a StopError.
+ * @param {{split?: number, timeout?: number, delay?: number, start?: number, debug?: boolean}} [options] - The options object.
  */
 function timeoutInParallel(caller, event, iterator, callback, options) {
   // Merge default options with user provided options
   options = Object.assign({
     // Default split value 
-    split: 4,
+    split: DEFAULT_SPLIT,
     // Default timeout of 5 minutes (in milliseconds)
-    timeout: 300000, // 5 * 60 * 1000
+    timeout: DEFAULT_TIMEOUT, // 5 * 60 * 1000
     // Default delay of 1 minute (in milliseconds)
-    delay: 60000, // 1 * 60 * 1000
+    delay: DEFAULT_DELAY, // 1 * 60 * 1000
     // Record the start time
     start: Date.now(),
     // Default debug logging to off
-    debug: false
+    debug: DEFAULT_DEBUG
   }, options);
 
   if (!iterator) {
@@ -232,8 +194,8 @@ function timeoutInParallel(caller, event, iterator, callback, options) {
  * @param {number} split - The number of splits remaining, used to determine recursion depth.
  * @param {number} index - The starting index for the current task segment.
  * @param {number} length - The total length of the task.
- * @param {caller} caller - The function to be executed by the triggers.
- * @param {Options} options - An object containing configuration options for the triggers:
+ * @param {(event: GoogleAppsScript.Events.TimeDriven) => void} caller - The function to be executed.
+ * @param {{split?: number, timeout?: number, delay?: number, start?: number, debug?: boolean}} [options] - The options object.
  */
 function createSplitTrigger_(split, index, length, caller, options) {
   // Calculate the length of the current section
@@ -340,7 +302,7 @@ function createRestartableIteratorFromRange_(range) {
 
 /**
  * Creates a restartable iterator from a provided 2D array. The iterator allows sequential access to the inner arrays within the main array, and offers the ability to 'restart' iteration from the beginning.
- * @param {Object[][]} array - The 2D array to iterate over.
+ * @param {any[][]} array - The 2D array to iterate over.
  * @returns {Object} A sealed iterator object.
  */
 function createRestartableIteratorFromArray_(array) {
@@ -489,8 +451,7 @@ function createRestartableIteratorFromPageTokenResponse_(request) {
  * A custom error that can be thrown to stop the execution of the timeout function.
  * @class
  * @param {string} [message=''] - The message of the error.
- * @param {Object} [options] - The options object.
- * @param {Error} [options.cause] - The cause of the error.
+ * @param {{cause: Error}} [options] - The options object. The cause of the error.
  */
 function StopError(message = '', options) {
   Object.defineProperties(this, {
