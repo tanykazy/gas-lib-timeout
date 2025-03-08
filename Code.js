@@ -15,7 +15,7 @@ const DEFAULT_DEBUG = false;
  * The timeout() function executes the specified code on a set of values sourced from an iterable object. Sets a timer and restarts the specified code when the execution time approaches the Google Apps Script time limit.
  * @param {(event: GoogleAppsScript.Events.TimeDriven) => void} caller - The function to be executed.
  * @param {GoogleAppsScript.Events.TimeDriven} event - The event object that triggered the function.
- * @param {{array?: any[][], range?: GoogleAppsScript.Spreadsheet.Range, request?: (pageToken: string) => any}} iterator - A union containing the values ​​to be processed.
+ * @param {(Array<any>|GoogleAppsScript.Spreadsheet.Range|(pageToken: string) => any)} iterator - A union containing the values ​​to be processed.
  * @param {(value: any) => void} callback - A function that is executed for each value in the iterable object, and will stop processing if it raises a StopError.
  * @param {{timeout?: number, delay?: number, start?: number, debug?: boolean}} [options] - The options object.
  * @returns {(GoogleAppsScript.Script.Trigger|null)} - a GoogleAppsScript.Script.Trigger or null
@@ -23,13 +23,9 @@ const DEFAULT_DEBUG = false;
 function timeout(caller, event, iterator, callback, options) {
   // Merge default options with user provided options
   options = Object.assign({
-    // Default timeout of 5 minutes (in milliseconds)
-    timeout: DEFAULT_TIMEOUT, // 5 * 60 * 1000
-    // Default delay of 1 minute (in milliseconds)
-    delay: DEFAULT_DELAY, // 1 * 60 * 1000
-    // Record the start time
+    timeout: DEFAULT_TIMEOUT,
+    delay: DEFAULT_DELAY,
     start: Date.now(),
-    // Default debug logging to off
     debug: DEFAULT_DEBUG
   }, options);
 
@@ -45,17 +41,27 @@ function timeout(caller, event, iterator, callback, options) {
   if (!iterator) {
     throw new ReferenceError('iterator is not defined.');
   }
-  if ([iterator.array, iterator.range, iterator.request].filter((e) => !!e).length > 1) {
-    throw new TypeError('iterator cannot be both array and range and request.');
-  }
-  if (iterator.array) {
-    iterator = createRestartableIteratorFromArray_(iterator.array);
-  } else if (iterator.range) {
-    iterator = createRestartableIteratorFromRange_(iterator.range);
-  } else if (iterator.request) {
-    iterator = createRestartableIteratorFromPageTokenResponse_(iterator.request);
+
+  if (Array.isArray(iterator)) {
+    iterator = createRestartableIteratorFromArray_(iterator);
+  } else if (iterator.toString() === 'Range') {
+    iterator = createRestartableIteratorFromRange_(iterator);
+  } else if (typeof iterator === 'function') {
+    iterator = createRestartableIteratorFromPageTokenResponse_(iterator);
   }
 
+  return timeout_(caller, event, iterator, callback, options);
+}
+
+/**
+ * @param {(event: GoogleAppsScript.Events.TimeDriven) => void} caller - The function to be executed.
+ * @param {GoogleAppsScript.Events.TimeDriven} event - The event object that triggered the function.
+ * @param {Object} iterator - An iterator object.
+ * @param {(value: any) => void} callback - A function that is executed for each value in the iterable object, and will stop processing if it raises a StopError.
+ * @param {{split?: number, timeout: number, delay: number, start: number, debug: boolean}} options - The options object.
+ * @returns {(GoogleAppsScript.Script.Trigger|null)} - a GoogleAppsScript.Script.Trigger or null
+ */
+function timeout_(caller, event, iterator, callback, options) {
   if (event && event.triggerUid) {
     const value = PropertiesService.getUserProperties()
       .getProperty(`${ScriptApp.getScriptId()}/${event.triggerUid}`);
@@ -134,22 +140,17 @@ function timeout(caller, event, iterator, callback, options) {
  * Execute the specified function in parallel with timeout handling.
  * @param {(event: GoogleAppsScript.Events.TimeDriven) => void} caller - The function to be executed.
  * @param {GoogleAppsScript.Events.TimeDriven} event - The event object that triggered the function.
- * @param {{array?: any[][], range?: GoogleAppsScript.Spreadsheet.Range}} iterator - A union containing the values ​​to be processed.
+ * @param {(Array<any>|GoogleAppsScript.Spreadsheet.Range)} iterator - A union containing the values ​​to be processed.
  * @param {(value: any) => void} callback - A function that is executed for each value in the iterable object, and will stop processing if it raises a StopError.
  * @param {{split?: number, timeout?: number, delay?: number, start?: number, debug?: boolean}} [options] - The options object.
  */
 function timeoutInParallel(caller, event, iterator, callback, options) {
   // Merge default options with user provided options
   options = Object.assign({
-    // Default split value 
     split: DEFAULT_SPLIT,
-    // Default timeout of 5 minutes (in milliseconds)
-    timeout: DEFAULT_TIMEOUT, // 5 * 60 * 1000
-    // Default delay of 1 minute (in milliseconds)
-    delay: DEFAULT_DELAY, // 1 * 60 * 1000
-    // Record the start time
+    timeout: DEFAULT_TIMEOUT,
+    delay: DEFAULT_DELAY,
     start: Date.now(),
-    // Default debug logging to off
     debug: DEFAULT_DEBUG
   }, options);
 
@@ -157,16 +158,14 @@ function timeoutInParallel(caller, event, iterator, callback, options) {
     throw new ReferenceError('iterator is not defined.');
   }
   // Check if the iterator is a request object.
-  if (iterator.request) {
+  if (typeof iterator === 'function') {
     throw new TypeError('iterators cannot be request.');
   }
-  if ([iterator.array, iterator.range].filter((e) => !!e).length > 1) {
-    throw new TypeError('iterator cannot be both array and range.');
-  }
-  if (iterator.array) {
-    iterator = createRestartableIteratorFromArray_(iterator.array);
-  } else if (iterator.range) {
-    iterator = createRestartableIteratorFromRange_(iterator.range);
+
+  if (Array.isArray(iterator)) {
+    iterator = createRestartableIteratorFromArray_(iterator);
+  } else if (iterator.toString() === 'Range') {
+    iterator = createRestartableIteratorFromRange_(iterator);
   }
 
   // Check if the split option is valid (cannot be greater than 4)
@@ -186,7 +185,7 @@ function timeoutInParallel(caller, event, iterator, callback, options) {
   }
 
   // If an event is provided, handle the timeout logic
-  timeout(caller, event, iterator, callback, options);
+  timeout_(caller, event, iterator, callback, options);
 }
 
 /**
