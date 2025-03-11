@@ -2,6 +2,9 @@
  * @file The library provides a way to set a timeout on a function call: if the function does not complete within the specified timeout, a timer is set to resume processing after a certain amount of time.
  */
 
+// Use Strict mode.
+'use strict';
+
 // Default timeout of 5 minutes (in milliseconds)
 const DEFAULT_TIMEOUT = 300000; // 5 * 60 * 1000
 // Default delay of 1 minute (in milliseconds)
@@ -43,11 +46,11 @@ function timeout(caller, event, iterator, callback, options) {
   }
 
   if (Array.isArray(iterator)) {
-    iterator = createRestartableIteratorFromArray_(iterator);
+    iterator = new RestartableIteratorFromArray(iterator);
   } else if (iterator.toString() === 'Range') {
-    iterator = createRestartableIteratorFromRange_(iterator);
+    iterator = new RestartableIteratorFromRange(iterator);
   } else if (typeof iterator === 'function') {
-    iterator = createRestartableIteratorFromPageTokenResponse_(iterator);
+    iterator = new RestartableIteratorFromRequestWithPageToken(iterator);
   }
 
   return timeout_(caller, event, iterator, callback, options);
@@ -166,9 +169,9 @@ function timeoutInParallel(caller, event, iterator, callback, options) {
   }
 
   if (Array.isArray(iterator)) {
-    iterator = createRestartableIteratorFromArray_(iterator);
+    iterator = new RestartableIteratorFromArray(iterator);
   } else if (iterator.toString() === 'Range') {
-    iterator = createRestartableIteratorFromRange_(iterator);
+    iterator = new RestartableIteratorFromRange(iterator);
   }
 
   // Check if the split option is valid (cannot be greater than 4)
@@ -232,222 +235,137 @@ function createSplitTrigger_(split, index, length, caller, options) {
 }
 
 /**
- * Creates a restartable iterator from a provided range object. The iterator allows sequential access to values within the range, and offers the ability to 'restart' iteration from the beginning.
- * @param {GoogleAppsScript.Spreadsheet.Range} range - The range object to iterate over.
- * @returns {Object} A sealed iterator object.
+ * A base class for creating restartable iterators.
+ * @constructor
  */
-function createRestartableIteratorFromRange_(range) {
-  const iterator = new Object();
-
-  Object.defineProperties(iterator, {
-    index: {
-      configurable: false,
-      enumerable: true,
-      value: 0,
-      writable: true
-    },
-    length: {
-      configurable: false,
-      enumerable: true,
-      value: range.getNumRows(),
-      writable: true
-    },
-    [Symbol.iterator]: {
-      configurable: false,
-      enumerable: true,
-      writable: false,
-      value: function () {
-        return this;
-      }
-    },
-    next: {
-      configurable: false,
-      enumerable: true,
-      writable: false,
-      value: function () {
-        if (this.index < this.length) {
-          return {
-            value: range.offset(this.index++, 0, 1),
-            done: false
-          };
-        }
-        return {
-          done: true
-        };
-      }
-    },
-    return: {
-      configurable: false,
-      enumerable: true,
-      writable: false,
-      value: function (value) {
-        return {
-          value: value,
-          done: true
-        };
-      }
-    },
-    throw: {
-      configurable: false,
-      enumerable: true,
-      writable: false,
-      value: function (exception) {
-        return {
-          done: true
-        };
-      }
-    }
-  });
-
-  return Object.seal(iterator);
-}
+function RestartableIterator_() { }
+RestartableIterator_.prototype[Symbol.iterator] = function () {
+  return this;
+};
+RestartableIterator_.prototype.return = function (value) {
+  return {
+    value: value,
+    done: true
+  };
+};
+RestartableIterator_.prototype.throw = function (exception) {
+  return {
+    done: true
+  };
+};
+RestartableIterator_.prototype.next = undefined;
+RestartableIterator_.prototype.index = undefined;
+RestartableIterator_.prototype.length = undefined;
 
 /**
- * Creates a restartable iterator from a provided 2D array. The iterator allows sequential access to the inner arrays within the main array, and offers the ability to 'restart' iteration from the beginning.
- * @param {any[][]} array - The 2D array to iterate over.
- * @returns {Object} A sealed iterator object.
+ * Creates a restartable iterator from a provided array. The iterator allows sequential access to the inner arrays within the main array, and offers the ability to 'restart' iteration from the beginning.
+ * @constructor
+ * @param {Array<any>} array - The array to iterate over.
  */
-function createRestartableIteratorFromArray_(array) {
-  const iterator = new Object();
-
-  Object.defineProperties(iterator, {
-    index: {
-      configurable: false,
-      enumerable: true,
-      value: 0,
-      writable: true
-    },
-    length: {
-      configurable: false,
-      enumerable: true,
-      value: array.length,
-      writable: true
-    },
-    [Symbol.iterator]: {
-      configurable: false,
-      enumerable: true,
-      writable: false,
-      value: function () {
-        return this;
-      }
-    },
-    next: {
-      configurable: false,
-      enumerable: true,
-      writable: false,
-      value: function () {
-        if (this.index < this.length) {
-          return {
-            value: array[this.index++],
-            done: false
-          };
-        }
-        return {
-          done: true
-        };
-      }
-    },
-    return: {
-      configurable: false,
-      enumerable: true,
-      writable: false,
-      value: function (value) {
-        return {
-          value: value,
-          done: true
-        };
-      }
-    },
-    throw: {
-      configurable: false,
-      enumerable: true,
-      writable: false,
-      value: function (exception) {
-        return {
-          done: true
-        };
-      }
-    }
-  });
-
-  return Object.seal(iterator);
+function RestartableIteratorFromArray(array) {
+  RestartableIterator_.call(this);
+  this.array = array;
+  this.index = 0;
+  this.length = array.length;
 }
+RestartableIteratorFromArray.prototype = Object.create(RestartableIterator_.prototype, {
+  constructor: {
+    value: RestartableIteratorFromArray,
+    enumerable: false,
+    writable: true,
+    configurable: true,
+  },
+  next: {
+    value: function (value) {
+      if (this.index < this.length) {
+        return {
+          value: this.array[this.index++],
+          done: false
+        };
+      }
+
+      return {
+        done: true
+      };
+    },
+    enumerable: false,
+    writable: true,
+    configurable: true,
+  }
+});
+
+/**
+ * Creates a restartable iterator from a provided range object. The iterator allows sequential access to values within the range, and offers the ability to 'restart' iteration from the beginning.
+ * @constructor
+ * @param {GoogleAppsScript.Spreadsheet.Range} range - The range object to iterate over.
+ */
+function RestartableIteratorFromRange(range) {
+  RestartableIterator_.call(this);
+  this.range = range;
+  this.index = 0;
+  this.length = range.getNumRows();
+}
+RestartableIteratorFromRange.prototype = Object.create(RestartableIterator_.prototype, {
+  constructor: {
+    value: RestartableIteratorFromRange,
+    enumerable: false,
+    writable: true,
+    configurable: true,
+  },
+  next: {
+    value: function (value) {
+      if (this.index < this.length) {
+        return {
+          value: this.range.offset(this.index++, 0, 1),
+          done: false
+        };
+      }
+
+      return {
+        done: true
+      };
+    },
+    enumerable: false,
+    writable: true,
+    configurable: true,
+  }
+});
 
 /**
  * Creates a restartable iterator from a provided request function. The iterator allows sequential access to results split by pageToken, and offers the ability to 'restart' iteration from the beginning.
- * @param {requestCallback} request 
- * @returns {Object} A sealed iterator object.
+ * @constructor
+ * @param {(pageToken?: string) => Object} request - The request function to iterate over.
  */
-function createRestartableIteratorFromPageTokenResponse_(request) {
-  const iterator = new Object();
-
-  Object.defineProperties(iterator, {
-    index: {
-      configurable: false,
-      enumerable: true,
-      value: undefined,
-      writable: true
-    },
-    length: {
-      configurable: false,
-      enumerable: true,
-      value: undefined,
-      writable: true
-    },
-    [Symbol.iterator]: {
-      configurable: false,
-      enumerable: true,
-      writable: false,
-      value: function () {
-        return this;
-      }
-    },
-    next: {
-      configurable: false,
-      enumerable: true,
-      writable: false,
-      value: function () {
-        const page = request(this.index);
-
-        this.index = page.pageToken;
-
-        if (this.index) {
-          return {
-            value: page,
-            done: false
-          };
-        }
-        return {
-          value: page,
-          done: true
-        };
-      }
-    },
-    return: {
-      configurable: false,
-      enumerable: true,
-      writable: false,
-      value: function (value) {
-        return {
-          value: value,
-          done: true
-        };
-      }
-    },
-    throw: {
-      configurable: false,
-      enumerable: true,
-      writable: false,
-      value: function (exception) {
-        return {
-          done: true
-        };
-      }
-    }
-  });
-
-  return Object.seal(iterator);
+function RestartableIteratorFromRequestWithPageToken(request) {
+  RestartableIterator_.call(this);
+  this.request = request;
+  this.index = undefined;
+  this.length = undefined;
 }
+RestartableIteratorFromRequestWithPageToken.prototype = Object.create(RestartableIterator_.prototype, {
+  constructor: {
+    value: RestartableIteratorFromRequestWithPageToken,
+    enumerable: false,
+    writable: true,
+    configurable: true,
+  },
+  next: {
+    value: function (value) {
+      const page = this.request(this.index);
+      const done = page.pageToken ? false : true;
+
+      this.index = page.pageToken;
+
+      return {
+        value: page,
+        done: done
+      };
+    },
+    enumerable: false,
+    writable: true,
+    configurable: true,
+  }
+});
 
 /**
  * A custom error that can be thrown to stop the execution of the timeout function.
@@ -456,18 +374,23 @@ function createRestartableIteratorFromPageTokenResponse_(request) {
  * @param {{cause: Error}} [options] - The options object. The cause of the error.
  */
 function StopError(message = '', options) {
-  Object.defineProperties(this, {
-    cause: {
-      configurable: true,
-      enumerable: false,
-      value: undefined,
-      writable: true
-    }
-  });
+  Error.call(this, message, options);
   this.message = message;
   if (options && options.cause) {
     this.cause = options.cause;
   }
 }
-StopError.prototype = Error.prototype;
-StopError.prototype.name = 'StopError';
+StopError.prototype = Object.create(Error.prototype, {
+  constructor: {
+    value: StopError,
+    enumerable: false,
+    writable: true,
+    configurable: true,
+  },
+  name: {
+    value: StopError.name,
+    enumerable: false,
+    writable: true,
+    configurable: true,
+  }
+});
