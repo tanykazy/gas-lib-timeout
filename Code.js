@@ -86,34 +86,37 @@ function timeout_(caller, event, iterator, callback, options) {
     }
 
     Object.assign(iterator, property);
-  }
 
-  for (const value of iterator) {
-    console.info(`iterator[${iterator.index}/${iterator.length}]`);
+    for (const value of iterator) {
+      console.info(`iterator[${iterator.index}/${iterator.length}]`);
 
-    try {
-      console.time(caller.name);
+      try {
+        console.time(caller.name);
 
-      callback(value);
+        callback(value);
 
-      console.timeEnd(caller.name);
-    } catch (error) {
-      if (error instanceof StopError) {
-        console.info('StopError catched.');
+        console.timeEnd(caller.name);
+      } catch (error) {
+        if (error instanceof StopError) {
+          console.info('StopError catched.');
 
-        return null;
+          return null;
+        }
+
+        throw error;
       }
 
-      throw error;
-    }
-
-    const progress = Date.now() - options.start;
-    if (progress > options.timeout) {
-      break;
+      const progress = Date.now() - options.start;
+      if (progress > options.timeout) {
+        break;
+      }
     }
   }
 
-  if ((iterator !== undefined && iterator.length === undefined) || (iterator.index < iterator.length)) {
+  if ((!event || !event.triggerUid) ||
+    (iterator !== undefined && iterator.length === undefined) ||
+    (iterator.index < iterator.length)) {
+
     const trigger = ScriptApp.newTrigger(caller.name)
       .timeBased()
       .after(options.delay)
@@ -182,10 +185,10 @@ function timeoutInParallel(caller, event, iterator, callback, options) {
 
     // Create split triggers for parallel execution
     createSplitTrigger_(options.split, iterator.index, iterator.length, caller, options);
+  } else {
+    // If an event is provided, handle the timeout logic
+    timeout_(caller, event, iterator, callback, options);
   }
-
-  // If an event is provided, handle the timeout logic
-  timeout_(caller, event, iterator, callback, options);
 }
 
 /**
