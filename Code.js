@@ -16,14 +16,14 @@ const DEFAULT_DEBUG = false;
 
 /**
  * The timeout() function executes the specified code on a set of values sourced from an iterable object. Sets a timer and restarts the specified code when the execution time approaches the Google Apps Script time limit.
- * @param {(event: GoogleAppsScript.Events.TimeDriven) => void} caller - The function to be executed.
+ * @param {string} functionName - The function to be executed.
  * @param {GoogleAppsScript.Events.TimeDriven} event - The event object that triggered the function.
  * @param {(Array<any>|GoogleAppsScript.Spreadsheet.Range|(pageToken: string) => any)} iterator - A union containing the values ​​to be processed.
  * @param {(value: any) => void} callback - A function that is executed for each value in the iterable object, and will stop processing if it raises a StopError.
  * @param {{timeout?: number, delay?: number, start?: number, debug?: boolean}} [options] - The options object.
  * @returns {(GoogleAppsScript.Script.Trigger|null)} - a GoogleAppsScript.Script.Trigger or null
  */
-function timeout(caller, event, iterator, callback, options) {
+function timeout(functionName, event, iterator, callback, options) {
   // Merge default options with user provided options
   options = Object.assign({
     timeout: DEFAULT_TIMEOUT,
@@ -32,11 +32,11 @@ function timeout(caller, event, iterator, callback, options) {
     debug: DEFAULT_DEBUG
   }, options);
 
-  if (typeof caller !== 'function') {
-    throw new TypeError('caller is not function.');
+  if (typeof functionName !== 'string') {
+    throw new TypeError('functionName is not string.');
   }
-  if (!caller.name) {
-    throw new ReferenceError('caller.name is not defined.');
+  if (functionName === '' || functionName === 'anonymous') {
+    throw new ReferenceError('functionName is not defined.');
   }
   if (typeof callback !== 'function') {
     throw new TypeError('callback is not function.');
@@ -45,112 +45,32 @@ function timeout(caller, event, iterator, callback, options) {
     throw new ReferenceError('iterator is not defined.');
   }
 
+  let restartableIterator;
   if (Array.isArray(iterator)) {
-    iterator = new RestartableIteratorFromArray(iterator);
+    restartableIterator = new RestartableIteratorFromArray(iterator);
   } else if (iterator.toString() === 'Range') {
-    iterator = new RestartableIteratorFromRange(iterator);
+    restartableIterator = new RestartableIteratorFromRange(iterator);
   } else if (typeof iterator === 'function') {
-    iterator = new RestartableIteratorFromRequestWithPageToken(iterator);
+    restartableIterator = new RestartableIteratorFromRequestWithPageToken(iterator);
   }
 
-  return timeout_(caller, event, iterator, callback, options);
-}
-
-/**
- * @param {(event: GoogleAppsScript.Events.TimeDriven) => void} caller - The function to be executed.
- * @param {GoogleAppsScript.Events.TimeDriven} event - The event object that triggered the function.
- * @param {Object} iterator - An iterator object.
- * @param {(value: any) => void} callback - A function that is executed for each value in the iterable object, and will stop processing if it raises a StopError.
- * @param {{split?: number, timeout: number, delay: number, start: number, debug: boolean}} options - The options object.
- * @returns {(GoogleAppsScript.Script.Trigger|null)} - a GoogleAppsScript.Script.Trigger or null
- */
-function timeout_(caller, event, iterator, callback, options) {
-  if (event && event.triggerUid) {
-    const value = PropertiesService.getUserProperties()
-      .getProperty(`${ScriptApp.getScriptId()}/${event.triggerUid}`);
-
-    if (value === null) {
-      throw new Error('Cannot find property for %s.', event.triggerUid);
-    }
-
-    const property = JSON.parse(value);
-    console.info('Restore property.', property);
-
-    const triggers = ScriptApp.getProjectTriggers();
-    for (const trigger of triggers) {
-      if (trigger.getUniqueId() === event.triggerUid) {
-        ScriptApp.deleteTrigger(trigger);
-        console.log('Delete trigger: %s', event.triggerUid);
-
-        PropertiesService.getUserProperties()
-          .deleteProperty(`${ScriptApp.getScriptId()}/${event.triggerUid}`);
-        console.log('Delete property.');
-      }
-    }
-
-    Object.assign(iterator, property);
-
-    for (const value of iterator) {
-      console.info(`iterator[${iterator.index}/${iterator.length}]`);
-
-      try {
-        console.time(caller.name);
-
-        callback(value);
-
-        console.timeEnd(caller.name);
-      } catch (error) {
-        if (error instanceof StopError) {
-          console.info('StopError catched.');
-
-          return null;
-        }
-
-        throw error;
-      }
-
-      const progress = Date.now() - options.start;
-      if (progress > options.timeout) {
-        break;
-      }
-    }
+  if (!restartableIterator) {
+    throw new Error('iterator is not supported.');
   }
 
-  if ((!event || !event.triggerUid) ||
-    (iterator !== undefined && iterator.length === undefined) ||
-    (iterator.index < iterator.length)) {
-
-    const trigger = ScriptApp.newTrigger(caller.name)
-      .timeBased()
-      .after(options.delay)
-      .create();
-
-    console.info('Create trigger. Function name: %s Unique ID: %s', trigger.getHandlerFunction(), trigger.getUniqueId());
-
-    const property = {
-      index: iterator.index,
-      length: iterator.length
-    };
-
-    PropertiesService.getUserProperties()
-      .setProperty(`${ScriptApp.getScriptId()}/${trigger.getUniqueId()}`, JSON.stringify(property));
-    console.info('Save property.', property);
-
-    return trigger;
-  }
-
-  return null;
+  return timeout_(functionName, event, restartableIterator, callback, options);
 }
 
 /**
  * Execute the specified function in parallel with timeout handling.
- * @param {(event: GoogleAppsScript.Events.TimeDriven) => void} caller - The function to be executed.
+ * @param {string} functionName - The function to be executed.
  * @param {GoogleAppsScript.Events.TimeDriven} event - The event object that triggered the function.
  * @param {(Array<any>|GoogleAppsScript.Spreadsheet.Range)} iterator - A union containing the values ​​to be processed.
  * @param {(value: any) => void} callback - A function that is executed for each value in the iterable object, and will stop processing if it raises a StopError.
  * @param {{split?: number, timeout?: number, delay?: number, start?: number, debug?: boolean}} [options] - The options object.
+ * @returns {Array<GoogleAppsScript.Script.Trigger|null>} - An array of newly created triggers.
  */
-function timeoutInParallel(caller, event, iterator, callback, options) {
+function timeoutInParallel(functionName, event, iterator, callback, options) {
   // Merge default options with user provided options
   options = Object.assign({
     split: DEFAULT_SPLIT,
@@ -160,6 +80,12 @@ function timeoutInParallel(caller, event, iterator, callback, options) {
     debug: DEFAULT_DEBUG
   }, options);
 
+  if (functionName === '' || functionName === 'anonymous') {
+    throw new ReferenceError('functionName is not defined.');
+  }
+  if (typeof callback !== 'function') {
+    throw new TypeError('callback is not function.');
+  }
   if (!iterator) {
     throw new ReferenceError('iterator is not defined.');
   }
@@ -167,16 +93,20 @@ function timeoutInParallel(caller, event, iterator, callback, options) {
   if (typeof iterator === 'function') {
     throw new TypeError('iterators cannot be request.');
   }
-
-  if (Array.isArray(iterator)) {
-    iterator = new RestartableIteratorFromArray(iterator);
-  } else if (iterator.toString() === 'Range') {
-    iterator = new RestartableIteratorFromRange(iterator);
-  }
-
   // Check if the split option is valid (cannot be greater than 4)
   if (options.split > 4) {
     throw new RangeError('options.split cannot be greater than 4.');
+  }
+
+  let restartableIterator;
+  if (Array.isArray(iterator)) {
+    restartableIterator = new RestartableIteratorFromArray(iterator);
+  } else if (iterator.toString() === 'Range') {
+    restartableIterator = new RestartableIteratorFromRange(iterator);
+  }
+
+  if (!restartableIterator) {
+    throw new Error('iterator is not supported.');
   }
 
   // If no event is provided, initiate the splitting process
@@ -187,22 +117,93 @@ function timeoutInParallel(caller, event, iterator, callback, options) {
     }
 
     // Create split triggers for parallel execution
-    createSplitTrigger_(options.split, iterator.index, iterator.length, caller, options);
+    return createSplitTrigger_(functionName, options.split, iterator.index, iterator.length, options);
   } else {
     // If an event is provided, handle the timeout logic
-    timeout_(caller, event, iterator, callback, options);
+    return [timeout_(functionName, event, iterator, callback, options)];
   }
 }
 
 /**
+ * @param {string} functionName - The function to be executed.
+ * @param {GoogleAppsScript.Events.TimeDriven} event - The event object that triggered the function.
+ * @param {Object} iterator - An iterator object.
+ * @param {(value: any) => void} callback - A function that is executed for each value in the iterable object, and will stop processing if it raises a StopError.
+ * @param {{split?: number, timeout: number, delay: number, start: number, debug: boolean}} options - The options object.
+ * @returns {(GoogleAppsScript.Script.Trigger|null)} - a GoogleAppsScript.Script.Trigger or null
+ */
+function timeout_(functionName, event, iterator, callback, options) {
+  if (event && event.triggerUid) {
+    const property = unregisterAndGetTriggerData_(event.triggerUid, options);
+
+    if (property === null) {
+      throw new Error('Cannot find property for %s.', event.triggerUid);
+    }
+
+    Object.assign(iterator, property);
+
+    for (const value of iterator) {
+      if (options.debug) {
+        console.log(`iterator[${iterator.index}/${iterator.length}]`);
+      }
+
+      try {
+        if (options.debug) {
+          console.time(functionName);
+        }
+
+        callback(value);
+
+        if (options.debug) {
+          console.timeEnd(functionName);
+        }
+      } catch (error) {
+        if (error instanceof StopError) {
+          console.info('StopError catched.', error);
+
+          return null;
+        }
+
+        throw error;
+      }
+
+      const progress = Date.now() - options.start;
+
+      if (options.debug) {
+        console.log(`progress: ${progress}ms, timeout: ${options.timeout}ms`);
+      }
+
+      if (progress > options.timeout) {
+        break;
+      }
+    }
+  }
+
+  if ((!event || !event.triggerUid) ||
+    (iterator instanceof RestartableIteratorFromRequestWithPageToken && iterator.index) ||
+    (iterator.index < iterator.length)) {
+
+    const trigger = registerAndPutTriggerData_(functionName, {
+      index: iterator.index,
+      length: iterator.length
+    }, options);
+
+    return trigger;
+  }
+
+  return null;
+}
+
+/**
  * Recursively creates split triggers for time-based execution of a function. Designed to break down a larger task into smaller, scheduled executions.
+ * @param {string} functionName - The function to be executed.
  * @param {number} split - The number of splits remaining, used to determine recursion depth.
  * @param {number} index - The starting index for the current task segment.
  * @param {number} length - The total length of the task.
- * @param {(event: GoogleAppsScript.Events.TimeDriven) => void} caller - The function to be executed.
  * @param {{split?: number, timeout?: number, delay?: number, start?: number, debug?: boolean}} [options] - The options object.
+ * @returns {Array<GoogleAppsScript.Script.Trigger>} - An array of newly created triggers.
  */
-function createSplitTrigger_(split, index, length, caller, options) {
+function createSplitTrigger_(functionName, split, index, length, options) {
   // Calculate the length of the current section
   const section = length - index;
 
@@ -211,27 +212,78 @@ function createSplitTrigger_(split, index, length, caller, options) {
 
   // If further splits are possible, recursively create triggers for the two halves
   if (split > 0 && left > 1) {
-    createSplitTrigger_(split - 1, index, index + left, caller, options);
-    createSplitTrigger_(split - 1, index + left, length, caller, options);
+    return [
+      ...createSplitTrigger_(functionName, split - 1, index, index + left, options),
+      ...createSplitTrigger_(functionName, split - 1, index + left, length, options)
+    ];
   } else {
-    // Base case: create a trigger for the current segment
-    const trigger = ScriptApp.newTrigger(caller.name)
-      .timeBased()
-      .after(options.delay)
-      .create();
-    console.info('Create trigger. Function name: %s Unique ID: %s', trigger.getHandlerFunction(), trigger.getUniqueId());
-
-    // Store the start and end indices for the segment as a property associated with the trigger
-    const property = {
-      index: index,
-      length: length
-    };
-
-    // Store the properties associated with the trigger
-    PropertiesService.getUserProperties()
-      .setProperty(`${ScriptApp.getScriptId()}/${trigger.getUniqueId()}`, JSON.stringify(property));
-    console.info('Save property.', property);
+    return [
+      registerAndPutTriggerData_(functionName, {
+        index: index,
+        length: length
+      }, options)
+    ];
   }
+}
+
+/**
+ * Registers a new trigger and stores associated data.
+ * @param {string} functionName - The function to be executed.
+ * @param {Object} property - The data to be stored with the trigger.
+ * @param {{split?: number, timeout: number, delay: number, start: number, debug: boolean}} options - The options object.
+ * @returns {GoogleAppsScript.Script.Trigger} - The newly created trigger.
+ */
+function registerAndPutTriggerData_(functionName, property, options) {
+  // Base case: create a trigger for the current segment
+  const trigger = ScriptApp.newTrigger(functionName)
+    .timeBased()
+    .after(options.delay)
+    .create();
+
+  console.info('Create trigger. Function name: %s Unique ID: %s', trigger.getHandlerFunction(), trigger.getUniqueId());
+
+  // Store the properties associated with the trigger
+  PropertiesService.getUserProperties()
+    .setProperty(`${ScriptApp.getScriptId()}/${trigger.getUniqueId()}`, JSON.stringify(property));
+
+  console.info('Save property.', property);
+
+  return trigger;
+}
+
+/**
+ * Unregisters a trigger and retrieves its associated data.
+ * @param {string} triggerUid - The unique identifier of the trigger.
+ * @param {{split?: number, timeout: number, delay: number, start: number, debug: boolean}} options - The options object.
+ * @returns {Object|null} - The data associated with the trigger, or null if the trigger or its data does not exist.
+ */
+function unregisterAndGetTriggerData_(triggerUid, options) {
+  const value = PropertiesService.getUserProperties()
+    .getProperty(`${ScriptApp.getScriptId()}/${triggerUid}`);
+
+  const property = JSON.parse(value);
+
+  console.info('Restore property.', property);
+
+  PropertiesService.getUserProperties()
+    .deleteProperty(`${ScriptApp.getScriptId()}/${triggerUid}`);
+
+  if (options.debug) {
+    console.log('Delete property.');
+  }
+
+  const triggers = ScriptApp.getProjectTriggers();
+  for (const trigger of triggers) {
+    if (trigger.getUniqueId() === triggerUid) {
+      ScriptApp.deleteTrigger(trigger);
+
+      if (options.debug) {
+        console.log('Delete trigger: %s', triggerUid);
+      }
+    }
+  }
+
+  return property;
 }
 
 /**
